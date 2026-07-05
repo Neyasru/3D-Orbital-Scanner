@@ -4,6 +4,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from contextlib import asynccontextmanager
 import asyncio
 import os
+import datetime
+import shutil
+import tempfile
+import glob
 
 from camera import Camera
 from scanner import Scanner
@@ -11,9 +15,12 @@ from scanner import Scanner
 camera = Camera()
 scanner = Scanner(camera)
 
+CALIBRATION_DIR = "calibration_photos"
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs("scans", exist_ok=True)
+    os.makedirs(CALIBRATION_DIR, exist_ok=True)
     yield
     await scanner.stop()
     camera.stop_stream()
@@ -21,12 +28,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# --- Pages ---
+ 
 @app.get("/")
 async def index():
     return FileResponse("static/index.html")
-
-# --- Calibration ---
-
+ 
 @app.get("/calibration")
 async def calibration_page():
     return FileResponse("static/calibration.html")
@@ -114,3 +121,85 @@ async def download_all():
     tmp = tempfile.mktemp(suffix=".zip")
     shutil.make_archive(tmp.replace(".zip", ""), "zip", "scans")
     return FileResponse(tmp, filename="all_scans.zip", media_type="application/zip")
+
+# --- Calibration ---
+ 
+@app.post("/calibration/capture")
+async def calibration_capture():
+    filename = datetime.datetime.now().strftime("calib_%Y%m%d_%H%M%S.jpg")
+    path = os.path.join(CALIBRATION_DIR, filename)
+    await asyncio.get_event_loop().run_in_executor(None, camera.capture, path)
+    return {"ok": True, "filename": filename}
+ 
+@app.get("/calibration/photos")
+async def calibration_list():
+    if not os.path.exists(CALIBRATION_DIR):
+        return []
+    return sorted([f for f in os.listdir(CALIBRATION_DIR) if f.endswith(".jpg")])
+ 
+@app.get("/calibration/photos/{filename}/thumb")
+async def calibration_thumb(filename: str):
+    path = os.path.join(CALIBRATION_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    # Genera thumbnail con OpenCV
+    import cv2
+    img = cv2.imread(path)
+    img = cv2.resize(img, (200, 150))
+    tmp = tempfile.mktemp(suffix=".jpg")
+    cv2.imwrite(tmp, img)
+    return FileResponse(tmp, media_type="image/jpeg")
+ 
+@app.delete("/calibration/photos/{filename}")
+async def calibration_delete(filename: str):
+    path = os.path.join(CALIBRATION_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    os.remove(path)
+    return {"ok": True}
+
+
+@app.post("/calibration/run")
+async def calibration_run():
+    import cv2
+    import numpy as np
+    import json
+ 
+    BOARD_W, BOARD_H = 7, 7
+    objp = np.zeros((BOARD_W * BOARD_H, 3), np.float32)
+    objp[:, :2] = np.mgrid[0:BOARD_W, 0:BOARD_H].T.reshape(-1, 2)
+ 
+    objpoints, imgpoints = [], []
+    images = glob.glob(os.path.join(CALIBRATION_DIR, "*.jpg"))
+ 
+    if len(images) < 5:
+        raise HTTPException(status_code=400, detail="Mínimo 5 fotos necesarias")
+ 
+    gray_shape = None
+    for fname in images:
+        img = cv2.imread(fname)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray_shape = gray.shape
+        ret, corners = cv2.findChessboardCorners(gray, (BOARD_W, BOARD_H), None)
+        if ret:
+            objpoints.append(objp)
+            corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
+                (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
+            imgpoints.append(corners2)
+ 
+    if len(objpoints) < 5:
+        raise HTTPException(status_code=400, detail="Pocas fotos con tablero detectado")
+ 
+    ret, mtx, dist, _, _ = cv2.calibrateCamera(
+        objpoints, imgpoints, gray_shape[::-1], None, None
+    )
+ 
+    calibration = {
+        "camera_matrix": mtx.tolist(),
+        "dist_coeffs": dist.tolist(),
+        "reprojection_error": ret
+    }
+    with open("calibration.json", "w") as f:
+        json.dump(calibration, f, indent=2)
+ 
+    return {"ok": True, "reprojection_error": ret, "photos_used": len(objpoints)}
