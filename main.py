@@ -25,6 +25,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def index():
     return FileResponse("static/index.html")
 
+# --- Calibration ---
+
+@app.get("/calibration")
+async def calibration_page():
+    return FileResponse("static/calibration.html")
+
 # --- Scan ---
 
 @app.post("/scan/start")
