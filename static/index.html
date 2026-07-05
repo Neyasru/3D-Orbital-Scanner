@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Escáner 3D Orbital</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f5f3;
+      --surface: #ffffff;
+      --surface-2: #f0efeb;
+      --border: rgba(0,0,0,0.1);
+      --border-strong: rgba(0,0,0,0.2);
+      --text: #1a1a18;
+      --text-secondary: #5f5e5a;
+      --text-muted: #888780;
+      --accent: #378add;
+      --accent-bg: #e6f1fb;
+      --success: #3b6d11;
+      --success-bg: #eaf3de;
+      --success-fill: #639922;
+      --danger: #a32d2d;
+      --danger-bg: #fcebeb;
+      --danger-border: #f09595;
+      --radius: 8px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1c1a;
+        --surface: #2c2c2a;
+        --surface-2: #232321;
+        --border: rgba(255,255,255,0.08);
+        --border-strong: rgba(255,255,255,0.16);
+        --text: #f0efeb;
+        --text-secondary: #b4b2a9;
+        --text-muted: #888780;
+        --accent-bg: #042c53;
+        --success-bg: #173404;
+        --danger-bg: #501313;
+        --danger-border: #791f1f;
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 520px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .header h1 { font-size: 18px; font-weight: 500; }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border-strong);
+      transition: background 0.3s;
+    }
+    .dot.active { background: var(--success-fill); }
+
+    /* Preview */
+    .preview {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      aspect-ratio: 4/3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 1rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .preview svg { width: 48px; height: 48px; color: var(--border-strong); }
+    .preview-label { font-size: 13px; color: var(--text-muted); }
+    .preview img {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      border-radius: 12px;
+      display: none;
+    }
+    .rec-badge {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: var(--danger-bg);
+      color: var(--danger);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: var(--radius);
+      display: none;
+    }
+    .rec-badge.visible { display: block; }
+
+    /* Config */
+    .config-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .config-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .config-label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+    .config-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      justify-content: flex-end;
+    }
+    input[type=range] {
+      flex: 1;
+      max-width: 160px;
+      accent-color: var(--accent);
+    }
+    .angle-value { font-size: 14px; font-weight: 500; min-width: 80px; text-align: right; }
+    .step-info { font-size: 11px; color: var(--text-muted); min-width: 70px; text-align: right; }
+
+    /* Controls */
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 1rem;
+    }
+    button {
+      border-radius: var(--radius);
+      padding: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      transition: opacity 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-start {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 0.5px solid currentColor;
+    }
+    .btn-stop {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 0.5px solid var(--danger-border);
+    }
+    .btn-preview {
+      grid-column: span 2;
+      background: var(--surface);
+      color: var(--text);
+      border: 0.5px solid var(--border-strong);
+    }
+    .btn-preview.active {
+      background: var(--accent-bg);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 1rem;
+    }
+    .stat {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+    }
+    .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+    .stat-value { font-size: 20px; font-weight: 500; }
+
+    /* Progress */
+    .progress-wrap { margin-bottom: 1rem; }
+    .progress-bar {
+      background: var(--surface);
+      border-radius: 4px;
+      height: 6px;
+      overflow: hidden;
+      border: 0.5px solid var(--border);
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Sessions */
+    .section-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .files {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 0.75rem 1rem;
+    }
+    .file-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 0.5px solid var(--border);
+    }
+    .file-row:last-of-type { border-bottom: none; }
+    .file-info { display: flex; flex-direction: column; gap: 2px; }
+    .file-name { font-size: 13px; }
+    .file-meta { font-size: 11px; color: var(--text-muted); }
+    .file-actions { display: flex; gap: 6px; align-items: center; }
+    .btn-dl {
+      background: none;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius);
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 400;
+    }
+    .btn-del { color: var(--danger); border-color: var(--danger-border); }
+    .btn-dl-all {
+      width: 100%;
+      background: var(--surface-2);
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius);
+      padding: 8px;
+      font-size: 13px;
+      color: var(--text);
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    .empty-sessions {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 1rem 0;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <h1>Escáner 3D orbital</h1>
+    <div class="status-pill">
+      <div class="dot" id="dot"></div>
+      <span id="status-text">Inactivo</span>
+    </div>
+  </div>
+
+  <div class="preview" id="preview-box">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" id="preview-icon">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+      <circle cx="12" cy="13" r="4"/>
+    </svg>
+    <span class="preview-label" id="preview-label">Stream de cámara inactivo</span>
+    <img id="preview-img" alt="Stream de cámara">
+    <div class="rec-badge" id="rec-badge">● REC</div>
+  </div>
+
+  <div class="config-card">
+    <div class="config-row">
+      <span class="config-label">Fotos</span>
+      <div class="config-right">
+        <input type="range" min="1" max="720" value="72" id="photos-slider" oninput="syncFromSlider(this.value)">
+        <input type="number" min="1" max="720" value="72" id="photos-input" oninput="syncFromInput(this.value)" style="width:60px; text-align:center;">
+        <span class="step-info" id="step-info">5.0° / foto</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-start" id="btn-start" onclick="startScan()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Iniciar escaneo
+    </button>
+    <button class="btn-stop" id="btn-stop" onclick="stopScan()" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      Parar
+    </button>
+    <button class="btn-preview" id="btn-preview" onclick="togglePreview()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
+      Activar preview en vivo
+    </button>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Grados</div>
+      <div class="stat-value" id="stat-angles">0°/360°</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Fotos</div>
+      <div class="stat-value" id="stat-photos">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Tamaño</div>
+      <div class="stat-value" id="stat-size">0 MB</div>
+    </div>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label">
+      <span id="progress-pct">0%</span>
+      <span id="progress-eta">—</span>
+    </div>
+  </div>
+
+  <div class="section-title">Sesiones</div>
+  <div class="files" id="sessions-list">
+    <div class="empty-sessions">Sin sesiones todavía</div>
+  </div>
+
+</div>
+<script>
+  let totalPhotos = 72;
+  let scanning = false;
+  let previewActive = false;
+  let currentAngle = 0;
+  let startTime = null;
+  let pollInterval = null;
+
+  function syncFromSlider(val) {
+    totalPhotos = Math.max(1, Math.min(720, parseInt(val)));
+    document.getElementById('photos-input').value = totalPhotos;
+    updateStepInfo();
+  }
+
+  function syncFromInput(val) {
+    totalPhotos = Math.max(1, Math.min(720, parseInt(val) || 1));
+    document.getElementById('photos-slider').value = totalPhotos;
+    updateStepInfo();
+  }
+
+  function updateStepInfo() {
+    const step = (360 / totalPhotos).toFixed(2);
+    document.getElementById('step-info').textContent = step + '° / foto';
+    document.getElementById('stat-angles').textContent = '0°/360°';
+  }
+
+  async function startScan() {
+    try {
+      const res = await fetch('/scan/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ total_angles: totalPhotos })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setScanningState(true);
+      startTime = Date.now();
+      pollInterval = setInterval(pollStatus, 1000);
+    } catch (e) {
+      alert('Error al iniciar: ' + e.message);
+    }
+  }
+
+  async function stopScan() {
+    try {
+      await fetch('/scan/stop', { method: 'POST' });
+      setScanningState(false);
+    } catch (e) {
+      alert('Error al parar: ' + e.message);
+    }
+  }
+
+  async function pollStatus() {
+    try {
+      const res = await fetch('/scan/status');
+      const data = await res.json();
+      currentAngle = data.current_angle;
+      const photos = data.photos_taken;
+      const sizeMB = data.size_mb;
+      const deg = Math.round((currentAngle / totalPhotos) * 360);
+      document.getElementById('stat-angles').textContent = deg + '°/360°';
+      document.getElementById('stat-photos').textContent = photos;
+      document.getElementById('stat-size').textContent = sizeMB + ' MB';
+      const pct = Math.round((currentAngle / totalPhotos) * 100);
+      document.getElementById('progress').style.width = pct + '%';
+      document.getElementById('progress-pct').textContent = pct + '%';
+      if (currentAngle > 0 && startTime) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const eta = Math.round((elapsed / currentAngle) * (totalPhotos - currentAngle));
+        document.getElementById('progress-eta').textContent = eta > 0 ? 'ETA ' + eta + 's' : 'Finalizando...';
+      }
+      if (data.state === 'idle') {
+        setScanningState(false);
+        loadSessions();
+      }
+    } catch (e) {
+      console.error('Poll error:', e);
+    }
+  }
+
+  function setScanningState(active) {
+    scanning = active;
+    document.getElementById('dot').classList.toggle('active', active);
+    document.getElementById('status-text').textContent = active ? 'Escaneando...' : 'Inactivo';
+    document.getElementById('rec-badge').classList.toggle('visible', active);
+    document.getElementById('btn-start').disabled = active;
+    document.getElementById('btn-stop').disabled = !active;
+    document.getElementById('photos-slider').disabled = active;
+    document.getElementById('photos-input').disabled = active;
+    if (!active) {
+      clearInterval(pollInterval);
+      document.getElementById('progress-eta').textContent = '—';
+    }
+  }
+
+  async function togglePreview() {
+    previewActive = !previewActive;
+    const btn = document.getElementById('btn-preview');
+    const img = document.getElementById('preview-img');
+    const icon = document.getElementById('preview-icon');
+    const label = document.getElementById('preview-label');
+    if (previewActive) {
+      await fetch('/stream/start', { method: 'POST' });
+      img.src = '/stream/feed?' + Date.now();
+      img.style.display = 'block';
+      icon.style.display = 'none';
+      label.style.display = 'none';
+      btn.textContent = 'Desactivar preview';
+      btn.classList.add('active');
+    } else {
+      await fetch('/stream/stop', { method: 'POST' });
+      img.style.display = 'none';
+      img.src = '';
+      icon.style.display = '';
+      label.style.display = '';
+      btn.textContent = 'Activar preview en vivo';
+      btn.classList.remove('active');
+    }
+  }
+
+  async function loadSessions() {
+    try {
+      const res = await fetch('/sessions');
+      const sessions = await res.json();
+      const list = document.getElementById('sessions-list');
+      if (sessions.length === 0) {
+        list.innerHTML = '<div class="empty-sessions">Sin sesiones todavía</div>';
+        return;
+      }
+      list.innerHTML = sessions.map(s => `
+        <div class="file-row">
+          <div class="file-info">
+            <span class="file-name">${s.name}</span>
+            <span class="file-meta">${s.photos} fotos · ${s.size_mb} MB · ${s.date}</span>
+          </div>
+          <div class="file-actions">
+            <a href="/sessions/${s.name}/download" class="btn-dl">Descargar</a>
+            <button class="btn-dl btn-del" onclick="deleteSession('${s.name}')">Eliminar</button>
+          </div>
+        </div>
+      `).join('') + `<button class="btn-dl-all" onclick="downloadAll()">Descargar todo</button>`;
+    } catch (e) {
+      console.error('Error cargando sesiones:', e);
+    }
+  }
+
+  async function deleteSession(name) {
+    if (!confirm(`¿Eliminar sesión "${name}"?`)) return;
+    await fetch(`/sessions/${name}`, { method: 'DELETE' });
+    loadSessions();
+  }
+
+  function downloadAll() {
+    window.location.href = '/sessions/download-all';
+  }
+
+  loadSessions();
+</script>
+</body>
+</html>
