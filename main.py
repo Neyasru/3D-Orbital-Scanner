@@ -150,13 +150,17 @@ async def calibration_thumb(filename: str):
     cv2.imwrite(tmp, img)
     return FileResponse(tmp, media_type="image/jpeg")
  
-@app.delete("/calibration/photos/{filename}")
-async def calibration_delete(filename: str):
+@app.get("/calibration/photos/{filename}/thumb")
+async def calibration_thumb(filename: str):
     path = os.path.join(CALIBRATION_DIR, filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Foto no encontrada")
-    os.remove(path)
-    return {"ok": True}
+    import cv2
+    from fastapi.responses import Response
+    img = cv2.imread(path)
+    img = cv2.resize(img, (200, 150))
+    _, buf = cv2.imencode(".jpg", img)
+    return Response(content=buf.tobytes(), media_type="image/jpeg")
 
 
 @app.post("/calibration/run")
